@@ -1,885 +1,332 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<!-- Playables SDK -->
-<script>// Playables SDK v1.0.0
-// Game lifecycle bridge: rAF-based game-ready detection + event communication
-(function() {
-  'use strict';
-
-  // Idempotency: skip if already initialized (e.g., server-side injection
-  // followed by client-side inject-javascript via the Bloks webview component).
-  if (window.playablesSDK) return;
-
-  var HANDLER_NAME = 'playablesGameEventHandler';
-  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
-  var RAF_FRAME_THRESHOLD = 3;
-
-  var gameReadySent = false;
-  var firstInteractionSent = false;
-  var errorSent = false;
-  var frameCount = 0;
-  var originalRAF = window.requestAnimationFrame;
-
-  // --- Transport Layer ---
-
-  function hasIOSBridge() {
-    return !!(window.webkit &&
-              window.webkit.messageHandlers &&
-              window.webkit.messageHandlers[HANDLER_NAME]);
-  }
-
-  function hasAndroidBridge() {
-    return !!(window[ANDROID_BRIDGE_NAME] &&
-              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
-  }
-
-  function isInIframe() {
-    return !!(window.parent && window.parent !== window);
-  }
-
-  function sendEvent(eventName, payload) {
-    var message = {
-      type: eventName,
-      payload: payload || {},
-      timestamp: Date.now()
-    };
-
-    if (hasIOSBridge()) {
-      try {
-        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
-      } catch (e) { /* ignore */ }
-      return;
-    }
-
-    if (hasAndroidBridge()) {
-    try {
-      var p = payload || {};
-      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
-      window[ANDROID_BRIDGE_NAME].postEvent(
-        eventName,
-        JSON.stringify(p)
-      );
-    } catch (e) { /* ignore */ }
-    return;
-  }
-
-    if (isInIframe()) {
-      try {
-        window.parent.postMessage(message, '*');
-      } catch (e) { /* ignore */ }
-      return;
-    }
-  }
-
-  // --- rAF Game-Ready Detection ---
-
-  function onFrame() {
-    if (gameReadySent) return;
-
-    frameCount++;
-    if (frameCount >= RAF_FRAME_THRESHOLD) {
-      gameReadySent = true;
-      sendEvent('game_ready', {
-        frame_count: frameCount,
-        detected_at: Date.now()
-      });
-      return;
-    }
-
-    originalRAF.call(window, onFrame);
-  }
-
-  if (originalRAF) {
-    window.requestAnimationFrame = function(callback) {
-      if (!gameReadySent) {
-        return originalRAF.call(window, function(timestamp) {
-          frameCount++;
-          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
-            gameReadySent = true;
-            sendEvent('game_ready', {
-              frame_count: frameCount,
-              detected_at: Date.now()
-            });
-          }
-          callback(timestamp);
-        });
-      }
-      return originalRAF.call(window, callback);
-    };
-  }
-
-  // --- First User Interaction Detection ---
-
-  function setupFirstInteractionDetection() {
-    var events = ['touchstart', 'mousedown', 'keydown'];
-
-    function onFirstInteraction() {
-      if (firstInteractionSent) return;
-      firstInteractionSent = true;
-      sendEvent('user_interaction_start', null);
-
-      for (var i = 0; i < events.length; i++) {
-        document.removeEventListener(events[i], onFirstInteraction, true);
-      }
-    }
-
-    for (var i = 0; i < events.length; i++) {
-      document.addEventListener(events[i], onFirstInteraction, true);
-    }
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
-  } else {
-    setupFirstInteractionDetection();
-  }
-
-  // --- Auto Error Capture ---
-
-  window.addEventListener('error', function(event) {
-    if (errorSent) return;
-    errorSent = true;
-    sendEvent('error', {
-      message: event.message || 'Unknown error',
-      source: event.filename || '',
-      lineno: event.lineno || 0,
-      colno: event.colno || 0,
-      auto_captured: true
-    });
-  });
-
-  window.addEventListener('unhandledrejection', function(event) {
-    if (errorSent) return;
-    errorSent = true;
-    var reason = event.reason;
-    sendEvent('error', {
-      message: (reason instanceof Error) ? reason.message : String(reason),
-      type: 'unhandled_promise_rejection',
-      auto_captured: true
-    });
-  });
-
-  // --- Public API ---
-
-  window.playablesSDK = {
-    complete: function(score) {
-      sendEvent('game_ended', {
-        score: score,
-        completed: true
-      });
-    },
-
-    error: function(message) {
-      if (errorSent) return;
-      errorSent = true;
-      sendEvent('error', {
-        message: message || 'Unknown error',
-        auto_captured: false
-      });
-    },
-
-    sendEvent: function(eventName, payload) {
-      if (!eventName || typeof eventName !== 'string') return;
-      sendEvent(eventName, payload);
-    }
-  };
-
-  // Kick off rAF detection in case no game code calls rAF immediately
-  if (originalRAF) {
-    originalRAF.call(window, onFrame);
-  }
-})();</script>
-<script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ورقة عمل: رتبة التماثل الدوراني وعدد خطوط التماثل للمضلعات</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap" rel="stylesheet">
-<!-- إضافة مكتبة html2canvas لتصوير الشاشة -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<style>
-  * {
-    font-family: 'Tajawal', sans-serif;
-  }
-  
-  body {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    background-attachment: fixed;
-  }
-  
-  .glass-effect {
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-  }
-  
-  .input-field {
-    transition: all 0.3s ease;
-  }
-  
-  .input-field:focus {
-    transform: scale(1.02);
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
-  }
-  
-  .shape-card {
-    transition: all 0.3s ease;
-  }
-  
-  .shape-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-  }
-  
-  .correct {
-    background-color: #dcfce7 !important;
-    border-color: #22c55e !important;
-    animation: pulse-green 0.5s ease;
-  }
-  
-  .incorrect {
-    background-color: #fee2e2 !important;
-    border-color: #ef4444 !important;
-    animation: shake 0.5s ease;
-  }
-  
-  @keyframes pulse-green {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-  }
-  
-  @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-5px); }
-    75% { transform: translateX(5px); }
-  }
-  
-  @keyframes float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-  }
-  
-  .floating {
-    animation: float 3s ease-in-out infinite;
-  }
-  
-  .shape-svg {
-    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));
-  }
-  
-  .radio-option:has(input:checked) {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    transform: scale(1.02);
-  }
-  
-  @media print {
-    body {
-      background: white;
-    }
-    .no-print {
-      display: none !important;
-    }
-    .glass-effect {
-      background: white;
-      border: 2px solid #e5e7eb;
-    }
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ترشيح الطالب المثالي - مدرسة محمد بن سليمان الغافري</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            background: linear-gradient(135deg, #e8f5e9 0%, #c8e6d9 100%);
+            font-family: 'Tajawal', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #1e3c2c;
+        }
+        .container {
+            max-width: 800px;
+            margin: 30px auto;
+            background: white;
+            border-radius: 32px;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #1b5e20, #2e7d32);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 1.8rem;
+        }
+        .header .school-name {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-top: 8px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .form-group {
+            margin-bottom: 25px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #1b5e20;
+        }
+        select, textarea, input {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 2px solid #e0e0e0;
+            font-size: 1rem;
+            font-family: inherit;
+            transition: all 0.3s;
+            background: #fafafa;
+        }
+        select:focus, textarea:focus, input:focus {
+            border-color: #4caf50;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+        button {
+            background: linear-gradient(135deg, #2e7d32, #1b5e20);
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            width: 100%;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .message {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+            font-weight: 500;
+            display: none;
+        }
+        .success { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .error { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+        .loading { background: #fff3e0; color: #e65100; border: 1px solid #ffb74d; }
+        .stats {
+            background: #f5f5f5;
+            border-radius: 12px;
+            padding: 15px;
+            margin-top: 25px;
+            text-align: center;
+            font-size: 0.85rem;
+            color: #666;
+        }
+        .student-count { font-size: 0.8rem; color: #666; margin-top: 5px; }
+        .required-star { color: #f44336; margin-right: 4px; }
+    </style>
 </head>
-<body class="min-h-screen py-6 px-4">
-  <div class="max-w-5xl mx-auto" id="worksheet-container">
-    <!-- Header -->
-    <div class="glass-effect rounded-3xl shadow-2xl p-6 md:p-8 mb-6">
-      <div class="text-center mb-6">
-        <div class="inline-flex items-center gap-3 mb-3">
-          <i class="fas fa-shapes text-4xl text-purple-600 floating"></i>
-          <h1 class="text-3xl md:text-4xl font-extrabold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-            رتبة التماثل الدوراني وعدد خطوط التماثل للمضلعات
-          </h1>
-          <i class="fas fa-star text-4xl text-yellow-500 floating" style="animation-delay: 0.5s;"></i>
-        </div>
-        <p class="text-gray-600 text-lg">ورقة عمل تفاعلية في الرياضيات</p>
-      </div>
-      
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <label class="block text-sm font-bold text-gray-700 mb-2">
-            <i class="fas fa-user text-purple-600 ml-1"></i>
-            الاسم:
-          </label>
-          <input type="text" class="input-field w-full px-4 py-3 border-2 border-purple-200 rounded-xl focus:outline-none focus:border-purple-500" placeholder="اكتب اسمك هنا">
-        </div>
-        <div>
-          <label class="block text-sm font-bold text-gray-700 mb-2">
-            <i class="fas fa-users text-blue-600 ml-1"></i>
-            الصف:
-          </label>
-          <input type="text" class="input-field w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:outline-none focus:border-blue-500" placeholder="الصف">
-        </div>
-        <div>
-          <label class="block text-sm font-bold text-gray-700 mb-2">
-            <i class="fas fa-calendar text-pink-600 ml-1"></i>
-            التاريخ:
-          </label>
-          <input type="date" class="input-field w-full px-4 py-3 border-2 border-pink-200 rounded-xl focus:outline-none focus:border-pink-500">
-        </div>
-      </div>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>⭐ ترشيح الطالب المثالي</h1>
+        <div class="school-name">مدرسة محمد بن سليمان الغافري للتعليم الأساسي</div>
     </div>
-
-    <!-- Definition Box -->
-    <div class="glass-effect rounded-3xl shadow-2xl p-6 md:p-8 mb-6 border-4 border-yellow-300">
-      <div class="flex items-start gap-4">
-        <div class="bg-gradient-to-br from-yellow-400 to-orange-500 rounded-2xl p-4 text-white">
-          <i class="fas fa-lightbulb text-3xl"></i>
-        </div>
-        <div class="flex-1">
-          <h2 class="text-2xl font-bold text-gray-800 mb-4">تعريفات مهمة</h2>
-          <div class="space-y-3">
-            <div class="bg-purple-50 p-4 rounded-xl border-r-4 border-purple-500">
-              <p class="text-gray-800"><span class="font-bold text-purple-700">رتبة التماثل الدوراني:</span> عدد المرات التي ينطبق فيها الشكل على نفسه خلال دورة كاملة (360°).</p>
+    
+    <div class="content">
+        <form id="nominationForm">
+            <div class="form-group">
+                <label>👨‍🏫 البريد الإلكتروني للمعلم <span class="required-star">*</span></label>
+                <input type="email" id="teacherEmail" placeholder="example@school.om" required>
             </div>
-            <div class="bg-blue-50 p-4 rounded-xl border-r-4 border-blue-500">
-              <p class="text-gray-800"><span class="font-bold text-blue-700">خط التماثل:</span> الخط المستقيم الذي يقسم الشكل إلى جزأين متطابقين تماماً، بحيث يكون كل جزء صورة مرآة للآخر.</p>
+
+            <div class="form-group">
+                <label>📚 اختيار الصف الدراسي <span class="required-star">*</span></label>
+                <select id="classSelect" required disabled>
+                    <option value="">-- جاري تحميل الصفوف --</option>
+                </select>
             </div>
-          </div>
+
+            <div class="form-group">
+                <label>🏅 اختيار الطالب المرشح <span class="required-star">*</span></label>
+                <select id="studentSelect" required disabled>
+                    <option value="">-- اختر الصف أولاً --</option>
+                </select>
+                <div class="student-count" id="studentCount"></div>
+            </div>
+
+            <div class="form-group">
+                <label>✍️ سبب الترشيح والتميز <span class="required-star">*</span></label>
+                <textarea id="reason" placeholder="اذكر أسباب ترشيح هذا الطالب للقب الطالب المثالي..." required></textarea>
+            </div>
+
+            <button type="submit">🗳️ تأكيد الترشيح</button>
+        </form>
+        <div id="messageBox" class="message"></div>
+        <div class="stats">
+            💡 ملاحظات: يمكن لأكثر من معلم تزكية الطالب نفسه | جميع الترشيحات تسجل تلقائياً في قاعدة البيانات
         </div>
-      </div>
     </div>
+</div>
 
-    <!-- تدريب 1: Table -->
-    <div class="glass-effect rounded-3xl shadow-2xl p-6 md:p-8 mb-6">
-      <div class="flex items-center gap-3 mb-6">
-        <div class="bg-gradient-to-br from-green-400 to-emerald-600 rounded-xl p-3 text-white">
-          <i class="fas fa-table text-2xl"></i>
-        </div>
-        <h2 class="text-2xl font-bold text-gray-800">تدريب 1: أكمل الجدول التالي</h2>
-      </div>
-      
-      <div class="overflow-x-auto">
-        <table class="w-full border-collapse">
-          <thead>
-            <tr class="bg-gradient-to-r from-purple-600 to-blue-600 text-white">
-              <th class="p-4 text-center rounded-tr-xl font-bold">الشكل</th>
-              <th class="p-4 text-center font-bold">عدد الأضلاع</th>
-              <th class="p-4 text-center font-bold">رتبة التماثل الدوراني</th>
-              <th class="p-4 text-center rounded-tl-xl font-bold">عدد خطوط التماثل</th>
-             </tr>
-          </thead>
-          <tbody id="table1">
-            <!-- Triangle -->
-            <tr class="border-b-2 border-gray-100 hover:bg-gray-50 transition" data-shape="triangle">
-              <td class="p-4 text-center font-bold text-gray-700">
-                <div class="flex flex-col items-center gap-2">
-                  <svg class="shape-svg w-16 h-16" viewBox="0 0 100 100">
-                    <polygon points="50,10 90,90 10,90" fill="#a78bfa" stroke="#7c3aed" stroke-width="3"/>
-                  </svg>
-                  <span>مثلث متساوي الأضلاع</span>
-                </div>
-               </td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="3" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="3" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="3" placeholder="?"></td>
-             </tr>
-            <!-- Square -->
-            <tr class="border-b-2 border-gray-100 hover:bg-gray-50 transition" data-shape="square">
-              <td class="p-4 text-center font-bold text-gray-700">
-                <div class="flex flex-col items-center gap-2">
-                  <svg class="shape-svg w-16 h-16" viewBox="0 0 100 100">
-                    <rect x="10" y="10" width="80" height="80" fill="#60a5fa" stroke="#2563eb" stroke-width="3"/>
-                  </svg>
-                  <span>مربع</span>
-                </div>
-               </td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="4" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="4" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="4" placeholder="?"></td>
-             </tr>
-            <!-- Pentagon -->
-            <tr class="border-b-2 border-gray-100 hover:bg-gray-50 transition" data-shape="pentagon">
-              <td class="p-4 text-center font-bold text-gray-700">
-                <div class="flex flex-col items-center gap-2">
-                  <svg class="shape-svg w-16 h-16" viewBox="0 0 100 100">
-                    <polygon points="50,10 90,40 75,85 25,85 10,40" fill="#f472b6" stroke="#db2777" stroke-width="3"/>
-                  </svg>
-                  <span>خماسي منتظم</span>
-                </div>
-               </td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="5" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="5" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="5" placeholder="?"></td>
-             </tr>
-            <!-- Hexagon -->
-            <tr class="border-b-2 border-gray-100 hover:bg-gray-50 transition" data-shape="hexagon">
-              <td class="p-4 text-center font-bold text-gray-700">
-                <div class="flex flex-col items-center gap-2">
-                  <svg class="shape-svg w-16 h-16" viewBox="0 0 100 100">
-                    <polygon points="30,10 70,10 90,50 70,90 30,90 10,50" fill="#34d399" stroke="#059669" stroke-width="3"/>
-                  </svg>
-                  <span>سداسي منتظم</span>
-                </div>
-               </td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="6" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="6" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="6" placeholder="?"></td>
-             </tr>
-            <!-- Heptagon -->
-            <tr class="border-b-2 border-gray-100 hover:bg-gray-50 transition" data-shape="heptagon">
-              <td class="p-4 text-center font-bold text-gray-700">
-                <div class="flex flex-col items-center gap-2">
-                  <svg class="shape-svg w-16 h-16" viewBox="0 0 100 100">
-                    <polygon points="50,10 80,28 90,58 72,85 28,85 10,58 20,28" fill="#fb923c" stroke="#ea580c" stroke-width="3"/>
-                  </svg>
-                  <span>سباعي منتظم</span>
-                </div>
-               </td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="7" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="7" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="7" placeholder="?"></td>
-             </tr>
-            <!-- Octagon -->
-            <tr class="hover:bg-gray-50 transition" data-shape="octagon">
-              <td class="p-4 text-center font-bold text-gray-700 rounded-br-xl">
-                <div class="flex flex-col items-center gap-2">
-                  <svg class="shape-svg w-16 h-16" viewBox="0 0 100 100">
-                    <polygon points="30,10 70,10 90,30 90,70 70,90 30,90 10,70 10,30" fill="#c084fc" stroke="#9333ea" stroke-width="3"/>
-                  </svg>
-                  <span>ثماني منتظم</span>
-                </div>
-               </td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="8" placeholder="?"></td>
-              <td class="p-4"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="8" placeholder="?"></td>
-              <td class="p-4 rounded-bl-xl"><input type="number" class="input-field w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-center" data-correct="8" placeholder="?"></td>
-             </tr>
-          </tbody>
-         </table>
-      </div>
-      
-      <button onclick="checkTable1()" class="no-print mt-6 w-full md:w-auto px-8 py-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold rounded-xl hover:from-green-600 hover:to-emerald-700 transition transform hover:scale-105 shadow-lg">
-        <i class="fas fa-check-circle ml-2"></i>
-        تحقق من الإجابات
-      </button>
-      <div id="result1" class="mt-4 text-center font-bold text-lg"></div>
-    </div>
+<script>
+    // =========================================================================
+    // إعدادات الربط مع بياناتك (تم تحديثها بناءً على معلوماتك)
+    // =========================================================================
+    const SPREADSHEET_ID = '1VNYJ4_r6FmzJLrGlr0zK6-2OPZ62P-4DD1inWElW7HU'; // معرف جدول الطلاب والصفوف
+    const SHEET_NAME = 'Level Up'; // اسم الورقة التي تحتوي على الصفوف والطلاب
+    const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzIfsp2D5Sb1N4xloUe7oZkrq1FnLgAIqmQgQPeFu31UE0CKPsilSwWt9JusSr5rWTc/exec'; // رابط حفظ الترشيحات الجديدة
 
-    <!-- تدريب 2: Lines of Symmetry -->
-    <div class="glass-effect rounded-3xl shadow-2xl p-6 md:p-8 mb-6">
-      <div class="flex items-center gap-3 mb-6">
-        <div class="bg-gradient-to-br from-pink-400 to-rose-600 rounded-xl p-3 text-white">
-          <i class="fas fa-drafting-compass text-2xl"></i>
-        </div>
-        <h2 class="text-2xl font-bold text-gray-800">تدريب 2: حدد عدد خطوط التماثل لكل شكل</h2>
-      </div>
-      
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="exercise2">
-        <div class="shape-card bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-2xl border-2 border-purple-200" data-answer="3">
-          <div class="flex flex-col items-center gap-4">
-            <svg class="shape-svg w-24 h-24" viewBox="0 0 100 100">
-              <polygon points="50,10 90,90 10,90" fill="#a78bfa" stroke="#7c3aed" stroke-width="3"/>
-            </svg>
-            <p class="font-bold text-gray-700">مثلث متساوي الأضلاع</p>
-            <input type="number" class="input-field w-24 px-3 py-2 border-2 border-purple-300 rounded-lg text-center font-bold text-lg" placeholder="?">
-            <div class="feedback text-sm font-bold"></div>
-          </div>
-        </div>
-        
-        <div class="shape-card bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border-2 border-blue-200" data-answer="1">
-          <div class="flex flex-col items-center gap-4">
-            <svg class="shape-svg w-24 h-24" viewBox="0 0 100 100">
-              <polygon points="50,10 90,50 50,90 10,50" fill="#60a5fa" stroke="#2563eb" stroke-width="3"/>
-            </svg>
-            <p class="font-bold text-gray-700">معيّن</p>
-            <input type="number" class="input-field w-24 px-3 py-2 border-2 border-blue-300 rounded-lg text-center font-bold text-lg" placeholder="?">
-            <div class="feedback text-sm font-bold"></div>
-          </div>
-        </div>
-        
-        <div class="shape-card bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-2xl border-2 border-green-200" data-answer="2">
-          <div class="flex flex-col items-center gap-4">
-            <svg class="shape-svg w-24 h-24" viewBox="0 0 100 100">
-              <rect x="15" y="25" width="70" height="50" fill="#34d399" stroke="#059669" stroke-width="3"/>
-            </svg>
-            <p class="font-bold text-gray-700">مستطيل</p>
-            <input type="number" class="input-field w-24 px-3 py-2 border-2 border-green-300 rounded-lg text-center font-bold text-lg" placeholder="?">
-            <div class="feedback text-sm font-bold"></div>
-          </div>
-        </div>
-        
-        <div class="shape-card bg-gradient-to-br from-pink-50 to-pink-100 p-6 rounded-2xl border-2 border-pink-200" data-answer="5">
-          <div class="flex flex-col items-center gap-4">
-            <svg class="shape-svg w-24 h-24" viewBox="0 0 100 100">
-              <polygon points="50,10 96,37 78,85 22,85 4,37" fill="#f472b6" stroke="#db2777" stroke-width="3"/>
-            </svg>
-            <p class="font-bold text-gray-700">نجمة خماسية منتظمة</p>
-            <input type="number" class="input-field w-24 px-3 py-2 border-2 border-pink-300 rounded-lg text-center font-bold text-lg" placeholder="?">
-            <div class="feedback text-sm font-bold"></div>
-          </div>
-        </div>
-        
-        <div class="shape-card bg-gradient-to-br from-orange-50 to-orange-100 p-6 rounded-2xl border-2 border-orange-200" data-answer="0">
-          <div class="flex flex-col items-center gap-4">
-            <svg class="shape-svg w-24 h-24" viewBox="0 0 100 100">
-              <path d="M 20 70 Q 50 30 80 70" fill="#fb923c" stroke="#ea580c" stroke-width="3"/>
-            </svg>
-            <p class="font-bold text-gray-700">قوس</p>
-            <input type="number" class="input-field w-24 px-3 py-2 border-2 border-orange-300 rounded-lg text-center font-bold text-lg" placeholder="?">
-            <div class="feedback text-sm font-bold"></div>
-          </div>
-        </div>
-        
-        <div class="shape-card bg-gradient-to-br from-cyan-50 to-cyan-100 p-6 rounded-2xl border-2 border-cyan-200" data-answer="infinite">
-          <div class="flex flex-col items-center gap-4">
-            <svg class="shape-svg w-24 h-24" viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="40" fill="#22d3ee" stroke="#0891b2" stroke-width="3"/>
-            </svg>
-            <p class="font-bold text-gray-700">دائرة</p>
-            <input type="text" class="input-field w-24 px-3 py-2 border-2 border-cyan-300 rounded-lg text-center font-bold text-lg" placeholder="?">
-            <div class="feedback text-sm font-bold"></div>
-          </div>
-        </div>
-      </div>
-      
-      <button onclick="checkExercise2()" class="no-print mt-6 w-full md:w-auto px-8 py-4 bg-gradient-to-r from-pink-500 to-rose-600 text-white font-bold rounded-xl hover:from-pink-600 hover:to-rose-700 transition transform hover:scale-105 shadow-lg">
-        <i class="fas fa-check-circle ml-2"></i>
-        تحقق من الإجابات
-      </button>
-      <p class="text-sm text-gray-600 mt-4"><i class="fas fa-info-circle text-blue-500 ml-1"></i> ملاحظة: للدائرة اكتب "لانهائي" أو "∞"</p>
-    </div>
-
-    <!-- تدريب 3: Text Questions -->
-    <div class="glass-effect rounded-3xl shadow-2xl p-6 md:p-8 mb-6">
-      <div class="flex items-center gap-3 mb-6">
-        <div class="bg-gradient-to-br from-amber-400 to-orange-600 rounded-xl p-3 text-white">
-          <i class="fas fa-pencil-alt text-2xl"></i>
-        </div>
-        <h2 class="text-2xl font-bold text-gray-800">تدريب 3: أجب عن الأسئلة التالية</h2>
-      </div>
-      
-      <div class="space-y-6">
-        <div class="bg-gradient-to-r from-amber-50 to-orange-50 p-6 rounded-2xl border-r-4 border-amber-500">
-          <label class="block font-bold text-gray-800 mb-3 text-lg">
-            <span class="bg-amber-500 text-white rounded-full w-8 h-8 inline-flex items-center justify-center ml-2">1</span>
-            ما العلاقة بين عدد أضلاع المضلع المنتظم ورتبة التماثل الدوراني له؟
-          </label>
-          <textarea class="input-field w-full px-4 py-3 border-2 border-amber-200 rounded-xl focus:outline-none focus:border-amber-500 min-h-[100px]" placeholder="اكتب إجابتك هنا..."></textarea>
-          <div class="mt-3 p-3 bg-white/70 rounded-lg no-print">
-            <p class="text-sm text-gray-700"><i class="fas fa-lightbulb text-yellow-500 ml-1"></i> <span class="font-bold">تلميح:</span> في المضلعات المنتظمة، رتبة التماثل الدوراني تساوي عدد الأضلاع</p>
-          </div>
-        </div>
-        
-        <div class="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-2xl border-r-4 border-green-500">
-          <label class="block font-bold text-gray-800 mb-3 text-lg">
-            <span class="bg-green-500 text-white rounded-full w-8 h-8 inline-flex items-center justify-center ml-2">2</span>
-            هل يمكن أن يكون للشكل عدد خطوط تماثل أكبر من رتبة التماثل الدوراني؟ اشرح بمثال.
-          </label>
-          <textarea class="input-field w-full px-4 py-3 border-2 border-green-200 rounded-xl focus:outline-none focus:border-green-500 min-h-[100px]" placeholder="اكتب إجابتك هنا..."></textarea>
-          <div class="mt-3 p-3 bg-white/70 rounded-lg no-print">
-            <p class="text-sm text-gray-700"><i class="fas fa-lightbulb text-yellow-500 ml-1"></i> <span class="font-bold">تلميح:</span> فكر في المستطيل أو المعين</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- تدريب 4: Multiple Choice -->
-    <div class="glass-effect rounded-3xl shadow-2xl p-6 md:p-8 mb-6">
-      <div class="flex items-center gap-3 mb-6">
-        <div class="bg-gradient-to-br from-indigo-400 to-purple-600 rounded-xl p-3 text-white">
-          <i class="fas fa-list-check text-2xl"></i>
-        </div>
-        <h2 class="text-2xl font-bold text-gray-800">تدريب 4: اختر الإجابة الصحيحة</h2>
-      </div>
-      
-      <div class="space-y-6" id="quiz">
-        <div class="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-2xl border-2 border-indigo-200">
-          <p class="font-bold text-gray-800 mb-4 text-lg">
-            <span class="bg-indigo-500 text-white rounded-full w-8 h-8 inline-flex items-center justify-center ml-2">1</span>
-            ما عدد خطوط التماثل للمستطيل؟
-          </p>
-          <div class="space-y-3">
-            <label class="radio-option flex items-center p-4 border-2 border-indigo-200 rounded-xl cursor-pointer transition hover:bg-indigo-50">
-              <input type="radio" name="q1" value="0" class="ml-3 w-5 h-5">
-              <span class="font-medium">0 خط</span>
-            </label>
-            <label class="radio-option flex items-center p-4 border-2 border-indigo-200 rounded-xl cursor-pointer transition hover:bg-indigo-50">
-              <input type="radio" name="q1" value="1" class="ml-3 w-5 h-5">
-              <span class="font-medium">1 خط</span>
-            </label>
-            <label class="radio-option flex items-center p-4 border-2 border-indigo-200 rounded-xl cursor-pointer transition hover:bg-indigo-50">
-              <input type="radio" name="q1" value="2" class="ml-3 w-5 h-5">
-              <span class="font-medium">2 خط</span>
-            </label>
-            <label class="radio-option flex items-center p-4 border-2 border-indigo-200 rounded-xl cursor-pointer transition hover:bg-indigo-50">
-              <input type="radio" name="q1" value="4" class="ml-3 w-5 h-5">
-              <span class="font-medium">4 خطوط</span>
-            </label>
-          </div>
-        </div>
-        
-        <div class="bg-gradient-to-r from-pink-50 to-rose-50 p-6 rounded-2xl border-2 border-pink-200">
-          <p class="font-bold text-gray-800 mb-4 text-lg">
-            <span class="bg-pink-500 text-white rounded-full w-8 h-8 inline-flex items-center justify-center ml-2">2</span>
-            أي من الأشكال التالية له رتبة تماثل دوراني 6؟
-          </p>
-          <div class="space-y-3">
-            <label class="radio-option flex items-center p-4 border-2 border-pink-200 rounded-xl cursor-pointer transition hover:bg-pink-50">
-              <input type="radio" name="q2" value="a" class="ml-3 w-5 h-5">
-              <span class="font-medium">مربع</span>
-            </label>
-            <label class="radio-option flex items-center p-4 border-2 border-pink-200 rounded-xl cursor-pointer transition hover:bg-pink-50">
-              <input type="radio" name="q2" value="b" class="ml-3 w-5 h-5">
-              <span class="font-medium">خماسي منتظم</span>
-            </label>
-            <label class="radio-option flex items-center p-4 border-2 border-pink-200 rounded-xl cursor-pointer transition hover:bg-pink-50">
-              <input type="radio" name="q2" value="c" class="ml-3 w-5 h-5">
-              <span class="font-medium">سداسي منتظم</span>
-            </label>
-            <label class="radio-option flex items-center p-4 border-2 border-pink-200 rounded-xl cursor-pointer transition hover:bg-pink-50">
-              <input type="radio" name="q2" value="d" class="ml-3 w-5 h-5">
-              <span class="font-medium">ثماني منتظم</span>
-            </label>
-          </div>
-        </div>
-        
-        <div class="bg-gradient-to-r from-cyan-50 to-blue-50 p-6 rounded-2xl border-2 border-cyan-200">
-          <p class="font-bold text-gray-800 mb-4 text-lg">
-            <span class="bg-cyan-500 text-white rounded-full w-8 h-8 inline-flex items-center justify-center ml-2">3</span>
-            ما هو الشكل الذي له عدد لانهائي من خطوط التماثل؟
-          </p>
-          <div class="space-y-3">
-            <label class="radio-option flex items-center p-4 border-2 border-cyan-200 rounded-xl cursor-pointer transition hover:bg-cyan-50">
-              <input type="radio" name="q3" value="a" class="ml-3 w-5 h-5">
-              <span class="font-medium">المربع</span>
-            </label>
-            <label class="radio-option flex items-center p-4 border-2 border-cyan-200 rounded-xl cursor-pointer transition hover:bg-cyan-50">
-              <input type="radio" name="q3" value="b" class="ml-3 w-5 h-5">
-              <span class="font-medium">السداسي</span>
-            </label>
-            <label class="radio-option flex items-center p-4 border-2 border-cyan-200 rounded-xl cursor-pointer transition hover:bg-cyan-50">
-              <input type="radio" name="q3" value="c" class="ml-3 w-5 h-5">
-              <span class="font-medium">الدائرة</span>
-            </label>
-            <label class="radio-option flex items-center p-4 border-2 border-cyan-200 rounded-xl cursor-pointer transition hover:bg-cyan-50">
-              <input type="radio" name="q3" value="d" class="ml-3 w-5 h-5">
-              <span class="font-medium">المثلث</span>
-            </label>
-          </div>
-        </div>
-      </div>
-      
-      <button onclick="checkQuiz()" class="no-print mt-6 w-full md:w-auto px-8 py-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold rounded-xl hover:from-indigo-600 hover:to-purple-700 transition transform hover:scale-105 shadow-lg">
-        <i class="fas fa-check-double ml-2"></i>
-        تحقق من الإجابات
-      </button>
-      <div id="quizResult" class="mt-4 text-center font-bold text-lg"></div>
-    </div>
-
-    <!-- Footer -->
-    <div class="glass-effect rounded-3xl shadow-2xl p-6 text-center border-4 border-gradient">
-      <div class="flex items-center justify-center gap-3 mb-3">
-        <i class="fas fa-heart text-3xl text-red-500 floating"></i>
-        <p class="text-2xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent">
-          تذكّر: التماثل يجعل الأشكال أكثر جمالاً وتنظيماً!
-        </p>
-        <i class="fas fa-star text-3xl text-yellow-500 floating" style="animation-delay: 0.5s;"></i>
-      </div>
-      <p class="text-gray-600 mt-2">
-        <i class="fas fa-sparkles text-purple-500 ml-1"></i>
-        أحسنت العمل! استمر في التعلم والاكتشاف
-      </p>
-      <!-- أزرار الطباعة وتصوير الشاشة وحسابات التواصل -->
-      <div class="flex flex-wrap justify-center gap-4 mt-4">
-        <button onclick="window.print()" class="px-6 py-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white font-bold rounded-xl hover:from-gray-700 hover:to-gray-800 transition transform hover:scale-105 shadow-lg">
-          <i class="fas fa-print ml-2"></i>
-          طباعة الورقة
-        </button>
-        <button onclick="captureScreenshot()" id="screenshotBtn" class="px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-bold rounded-xl hover:from-blue-700 hover:to-cyan-700 transition transform hover:scale-105 shadow-lg">
-          <i class="fas fa-camera ml-2"></i>
-          تصوير الشاشة وإعادة الإرسال
-        </button>
-      </div>
-      
-      <!-- قسم التواصل الاجتماعي -->
-      <div class="mt-6 pt-4 border-t-2 border-gray-200">
-        <div class="flex flex-wrap items-center justify-center gap-6 text-gray-700">
-          <div class="flex items-center gap-2">
-            <i class="fas fa-user-graduate text-purple-600 text-xl"></i>
-            <span class="font-bold">إعداد: وليد الصلتي المحمدي</span>
-          </div>
-          <a href="https://www.instagram.com/walid.saltit/" target="_blank" class="flex items-center gap-2 text-pink-600 hover:text-pink-800 transition transform hover:scale-110">
-            <i class="fab fa-instagram text-2xl"></i>
-            <span>Instagram</span>
-          </a>
-          <a href="https://twitter.com/@walid_salti" target="_blank" class="flex items-center gap-2 text-blue-500 hover:text-blue-700 transition transform hover:scale-110">
-            <i class="fab fa-twitter text-2xl"></i>
-            <span>Twitter</span>
-          </a>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    // دالة تصوير الشاشة
-    function captureScreenshot() {
-      const element = document.getElementById('worksheet-container');
-      const btn = document.getElementById('screenshotBtn');
-      
-      // تغيير نص الزر لإظهار حالة المعالجة مع الحفاظ على الأيقونة
-      const originalText = btn.innerHTML;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin ml-2"></i> جاري التصوير...';
-      btn.disabled = true;
-
-      // استخدام html2canvas لتصوير العنصر
-      html2canvas(element, {
-        scale: 2, // دقة عالية
-        backgroundColor: '#ffffff',
-        logging: false,
-        useCORS: true,
-        allowTaint: false
-      }).then(canvas => {
-        // تحويل الكانفاس إلى رابط صورة
-        const image = canvas.toDataURL('image/png');
-        
-        // إنشاء رابط تحميل مؤقت
-        const link = document.createElement('a');
-        const timestamp = new Date().toISOString().slice(0,19).replace(/:/g, '-');
-        link.download = `ورقة_عمل_التماثل_${timestamp}.png`;
-        link.href = image;
-        link.click();
-        
-        // إعادة الزر لحالته الطبيعية
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-        
-        // عرض رسالة نجاح مؤقتة
-        const resultDiv = document.createElement('div');
-        resultDiv.className = 'fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-xl shadow-xl z-50 font-bold animate-bounce';
-        resultDiv.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم حفظ صورة الورقة بنجاح!';
-        document.body.appendChild(resultDiv);
-        setTimeout(() => resultDiv.remove(), 3000);
-      }).catch(error => {
-        console.error('خطأ في التصوير:', error);
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-        
-        // عرض رسالة خطأ
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-xl shadow-xl z-50 font-bold';
-        errorDiv.innerHTML = '<i class="fas fa-exclamation-triangle ml-2"></i> حدث خطأ أثناء التصوير، يرجى المحاولة مرة أخرى.';
-        document.body.appendChild(errorDiv);
-        setTimeout(() => errorDiv.remove(), 3000);
-      });
-    }
-
-    // دوال التحقق الموجودة مسبقاً
-    function checkTable1() {
-      const inputs = document.querySelectorAll('#table1 input');
-      let correct = 0;
-      let total = inputs.length;
-      
-      inputs.forEach(input => {
-        const userAnswer = parseInt(input.value);
-        const correctAnswer = parseInt(input.dataset.correct);
-        input.classList.remove('correct', 'incorrect');
-        
-        if (userAnswer === correctAnswer) {
-          input.classList.add('correct');
-          correct++;
-        } else {
-          input.classList.add('incorrect');
+    // =========================================================================
+    // جلب بيانات الطلاب والصفوف من جدول "Level Up"
+    // =========================================================================
+    async function loadStudentsData() {
+        const classSelect = document.getElementById('classSelect');
+        try {
+            showMessage('⏳ جاري تحميل بيانات الطلاب...', 'loading');
+            classSelect.disabled = true;
+            
+            // استخدام Google Visualization API لقراءة البيانات بشكل آمن
+            const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${SHEET_NAME}`;
+            const response = await fetch(url);
+            const text = await response.text();
+            
+            // تنظيف البيانات المستلمة
+            const jsonText = text.substring(47, text.length - 2);
+            const data = JSON.parse(jsonText);
+            
+            // تحويل البيانات إلى كائن studentsData { "الصف": ["طالب1", "طالب2"] }
+            const studentsData = {};
+            const rows = data.table.rows;
+            
+            for (let i = 0; i < rows.length; i++) {
+                const row = rows[i].c;
+                if (row && row[0] && row[0].v && row[1] && row[1].v) {
+                    const className = row[0].v.toString().trim();
+                    const studentName = row[1].v.toString().trim();
+                    if (!studentsData[className]) studentsData[className] = [];
+                    if (!studentsData[className].includes(studentName)) studentsData[className].push(studentName);
+                }
+            }
+            
+            // تحديث قائمة الصفوف في الواجهة
+            updateClassSelect(studentsData);
+            showMessage(`✅ تم تحميل ${Object.keys(studentsData).length} صف و ${Object.values(studentsData).flat().length} طالب`, 'success');
+            
+            // حفظ البيانات في كائن عام لاستخدامها لاحقاً
+            window.studentsData = studentsData;
+            
+        } catch (error) {
+            console.error('خطأ في التحميل:', error);
+            showMessage('❌ فشل تحميل البيانات. تأكد من نشر جدول "Level Up" للعامة.', 'error');
+            window.studentsData = {}; // بيانات فارغة لمنع الأخطاء
+            classSelect.innerHTML = '<option value="">-- خطأ في التحميل --</option>';
+        } finally {
+            classSelect.disabled = false;
         }
-      });
-      
-      const result = document.getElementById('result1');
-      const percentage = Math.round((correct / total) * 100);
-      
-      if (correct === total) {
-        result.innerHTML = `<div class="text-green-600"><i class="fas fa-check-circle ml-2"></i>ممتاز! جميع الإجابات صحيحة (${correct}/${total})</div>`;
-      } else {
-        result.innerHTML = `<div class="text-orange-600"><i class="fas fa-exclamation-circle ml-2"></i>أحسنت المحاولة! حصلت على ${correct} من ${total} (${percentage}%)</div>`;
-      }
     }
     
-    function checkExercise2() {
-      const cards = document.querySelectorAll('#exercise2 .shape-card');
-      let correct = 0;
-      
-      cards.forEach(card => {
-        const input = card.querySelector('input');
-        const feedback = card.querySelector('.feedback');
-        const answer = card.dataset.answer;
-        let userAnswer = input.value.trim().toLowerCase();
+    // تحديث قائمة الصفوف في عنصر select
+    function updateClassSelect(studentsData) {
+        const classSelect = document.getElementById('classSelect');
+        let options = '<option value="">-- اختر الصف --</option>';
         
-        input.classList.remove('correct', 'incorrect');
-        feedback.innerHTML = '';
-        
-        // Handle infinite case
-        if (answer === 'infinite') {
-          if (userAnswer === 'لانهائي' || userAnswer === '∞' || userAnswer === 'infinite' || userAnswer === 'مالانهاية') {
-            input.classList.add('correct');
-            feedback.innerHTML = '<span class="text-green-600"><i class="fas fa-check ml-1"></i>صحيح!</span>';
-            correct++;
-          } else {
-            input.classList.add('incorrect');
-            feedback.innerHTML = '<span class="text-red-600"><i class="fas fa-times ml-1"></i>الإجابة: لانهائي</span>';
-          }
-        } else {
-          if (parseInt(userAnswer) === parseInt(answer)) {
-            input.classList.add('correct');
-            feedback.innerHTML = '<span class="text-green-600"><i class="fas fa-check ml-1"></i>صحيح!</span>';
-            correct++;
-          } else {
-            input.classList.add('incorrect');
-            feedback.innerHTML = `<span class="text-red-600"><i class="fas fa-times ml-1"></i>الإجابة: ${answer}</span>`;
-          }
-        }
-      });
-      
-      if (correct === cards.length) {
-        setTimeout(() => {
-          alert('🎉 ممتاز! جميع إجاباتك صحيحة!');
-        }, 500);
-      }
-    }
-    
-    function checkQuiz() {
-      const answers = {q1: '2', q2: 'c', q3: 'c'};
-      let correct = 0;
-      let total = Object.keys(answers).length;
-      
-      for (let q in answers) {
-        const selected = document.querySelector(`input[name="${q}"]:checked`);
-        const labels = document.querySelectorAll(`input[name="${q}"]`);
-        
-        labels.forEach(label => {
-          label.parentElement.classList.remove('ring-4', 'ring-green-400', 'ring-red-400');
+        Object.keys(studentsData).sort().forEach(className => {
+            options += `<option value="${className}">📖 ${className} (${studentsData[className].length} طالب)</option>`;
         });
         
-        if (selected) {
-          if (selected.value === answers[q]) {
-            selected.parentElement.classList.add('ring-4', 'ring-green-400');
-            correct++;
-          } else {
-            selected.parentElement.classList.add('ring-4', 'ring-red-400');
-            // Show correct answer
-            document.querySelector(`input[name="${q}"][value="${answers[q]}"]`).parentElement.classList.add('ring-4', 'ring-green-400');
-          }
-        }
-      }
-      
-      const result = document.getElementById('quizResult');
-      const percentage = Math.round((correct / total) * 100);
-      
-      if (correct === total) {
-        result.innerHTML = `<div class="text-green-600"><i class="fas fa-trophy ml-2"></i>رائع! أجبت على جميع الأسئلة بشكل صحيح (${correct}/${total})</div>`;
-      } else {
-        result.innerHTML = `<div class="text-blue-600"><i class="fas fa-info-circle ml-2"></i>نتيجتك: ${correct} من ${total} (${percentage}%) - الإجابات الصحيحة محددة بالأخضر</div>`;
-      }
+        classSelect.innerHTML = options;
     }
-  </script>
+    
+    // عند اختيار صف، يتم عرض قائمة الطلاب الخاصة به
+    function updateStudentsList() {
+        const classSelect = document.getElementById('classSelect');
+        const studentSelect = document.getElementById('studentSelect');
+        const studentCountSpan = document.getElementById('studentCount');
+        const selectedClass = classSelect.value;
+        
+        if (!selectedClass || !window.studentsData || !window.studentsData[selectedClass]) {
+            studentSelect.disabled = true;
+            studentSelect.innerHTML = '<option value="">-- اختر الصف أولاً --</option>';
+            studentCountSpan.textContent = '';
+            return;
+        }
+        
+        const studentsList = window.studentsData[selectedClass];
+        let options = '<option value="">-- اختر الطالب --</option>';
+        studentsList.sort().forEach(student => {
+            options += `<option value="${student}">👨‍🎓 ${student}</option>`;
+        });
+        
+        studentSelect.innerHTML = options;
+        studentSelect.disabled = false;
+        studentCountSpan.textContent = `📊 عدد الطلاب في ${selectedClass}: ${studentsList.length} طالب`;
+    }
+    
+    // =========================================================================
+    // إرسال الترشيح إلى رابط Google Apps Script
+    // =========================================================================
+    async function submitNomination(teacherEmail, className, studentName, reason) {
+        const response = await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                teacherEmail: teacherEmail,
+                className: className,
+                studentName: studentName,
+                reason: reason,
+                timestamp: new Date().toLocaleString('ar-OM', { timeZone: 'Asia/Muscat' }),
+                status: "قيد المراجعة"
+            })
+        });
+        
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const result = await response.json();
+        if (result.result !== "success") throw new Error(result.message || "فشل الحفظ");
+        return result;
+    }
+    
+    // =========================================================================
+    // وظائف مساعدة (عرض الرسائل، التحقق، تهيئة الصفحة)
+    // =========================================================================
+    function showMessage(message, type) {
+        const msgDiv = document.getElementById('messageBox');
+        msgDiv.textContent = message;
+        msgDiv.className = `message ${type}`;
+        msgDiv.style.display = 'block';
+        setTimeout(() => msgDiv.style.display = 'none', 5000);
+    }
+    
+    // تهيئة الصفحة عند التحميل
+    document.addEventListener('DOMContentLoaded', () => {
+        loadStudentsData(); // تحميل بيانات الطلاب والصفوف
+        
+        const classSelect = document.getElementById('classSelect');
+        const studentSelect = document.getElementById('studentSelect');
+        const form = document.getElementById('nominationForm');
+        
+        classSelect.addEventListener('change', updateStudentsList);
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const teacherEmail = document.getElementById('teacherEmail').value.trim();
+            const className = classSelect.value;
+            const studentName = studentSelect.value;
+            const reason = document.getElementById('reason').value.trim();
+            
+            if (!teacherEmail || !teacherEmail.includes('@')) return showMessage('يرجى إدخال بريد إلكتروني صحيح', 'error');
+            if (!className) return showMessage('يرجى اختيار الصف', 'error');
+            if (!studentName) return showMessage('يرجى اختيار الطالب', 'error');
+            if (reason.length < 10) return showMessage('يرجى كتابة سبب الترشيح (10 أحرف على الأقل)', 'error');
+            
+            const submitBtn = form.querySelector('button');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '⏳ جاري الإرسال...';
+            
+            try {
+                await submitNomination(teacherEmail, className, studentName, reason);
+                showMessage(`✅ تم ترشيح ${studentName} بنجاح!`, 'success');
+                form.reset();
+                classSelect.value = '';
+                updateStudentsList(); // إعادة تعيين قائمة الطلاب
+            } catch (error) {
+                console.error(error);
+                showMessage('❌ فشل الإرسال: ' + error.message, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+            }
+        });
+    });
+</script>
 </body>
 </html>
